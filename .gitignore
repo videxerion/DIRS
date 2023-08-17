@@ -6,3 +6,4 @@
 *.iml
 out
 gen
+DIRS/__pycache__/
