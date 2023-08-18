@@ -18,6 +18,11 @@ class ScanHasNotBeenStartedError(Exception):
         super().__init__("Cannot be used until scanning is started")
 
 
-class ServerIsAlreadyRunning(Exception):
+class ServerIsAlreadyRunningError(Exception):
     def __init__(self):
         super().__init__("Unable to start an already running server")
+
+
+class NoClientsError(Exception):
+    def __init__(self):
+        super().__init__("Unable to start scan because there is no client")

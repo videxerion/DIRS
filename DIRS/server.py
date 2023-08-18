@@ -59,6 +59,7 @@ class Server:
         self.__result_func = lambda x: self.logger.debug(f'Result: {x}')
         self.__new_client_func = lambda x: self.logger.debug(f'New client: {x}')
         self.__delete_client_func = lambda x: self.logger.debug(f'Delete client: {x}')
+        self.__new_state_func = lambda x, y: self.logger.debug(f'New state {x}: {y}')
         self.logger = logging.getLogger('server')
         self.__network = ipaddress.IPv4Network(network)
         self.__ip_generator = IPGenerator(self.__network)
@@ -78,6 +79,13 @@ class Server:
         self.__delete_client_func = func
         return func
 
+    def new_state_handler(self, func: Callable):
+        self.logger.debug(f'Set new_state_handler - {func} with name {func.__name__}')
+        self.__new_state_func = func
+        return func
+
+
+
     def set_network(self, network):
         if not self.scan_started:
             self.__network = ipaddress.IPv4Network(network)
@@ -88,9 +96,10 @@ class Server:
     def __bind(self, ip, port):
         try:
             self.__socket.bind((ip, port))
+            return True
         except OSError:
             self.logger.critical('Address already in use')
-            return -1
+            return False
 
     def kick(self, UUID: str, reason='Disconnected by server'):
         pck = self.__create_package(3, reason.encode('utf-8'))
@@ -99,49 +108,52 @@ class Server:
         self.__delete_client_func(UUID)
 
     def start_scanning(self, readiness='exception'):
-        self.scan_started = True
-        self.__stop_accept_requests_event.set()
-        self.logger.debug('Stopped accepting new connections and scan_started is set to True')
+        if len(self.__clients) != 0:
+            self.scan_started = True
+            self.__stop_accept_requests_event.set()
+            self.logger.debug('Stopped accepting new connections and scan_started is set to True')
 
-        for UUID in self.__clients.keys():
-            if self.__clients[UUID]['State'] == constants.States.NOT_READY:
-                if readiness == constants.Check.EXCEPTION:
-                    raise exceptions.NotAllClientsReadyError()
-                elif readiness == constants.Check.KICK:
-                    self.kick(UUID, reason=f'Client {UUID} wasn\'t ready when server start scanning')
-
-        self.logger.debug('Completed clients verification')
-
-        self.__stop_accept_packages_event.set()
-        self.logger.debug('Started intercept the reception of packets from the client')
-
-        for UUID in self.__clients.keys():
-            self.logger.debug(f'Send start_scanning package to {UUID}')
-            pck = self.__create_package(4, pack.unsigned_char(0))
-            self.__clients[UUID]['Connection'].send(pck)
-
-            while True:
-                data = self.__clients[UUID]['Connection'].recv(10240)
-                pck_id, pck_body = self.__parse_package(data)
-
-                if pck_id == 4:
-                    readiness_client = struct.unpack('!B', pck_body)[0]
-
-                    if readiness_client == constants.Check.EXCEPTION:
+            for UUID in self.__clients.keys():
+                if self.__clients[UUID]['State'] == constants.States.NOT_READY:
+                    if readiness == constants.Check.EXCEPTION:
                         raise exceptions.NotAllClientsReadyError()
-                    elif readiness_client == constants.Check.KICK:
-                        self.kick(UUID,
-                                  reason=f'Client {UUID} wasn\'t ready when server start scanning')
+                    elif readiness == constants.Check.KICK:
+                        self.kick(UUID, reason=f'Client {UUID} wasn\'t ready when server start scanning')
 
-                    self.logger.debug(f'Send to the client with UUID - {UUID} the final package of readiness')
+            self.logger.debug('Completed clients verification')
 
-                    pck = self.__create_package(4, pack.unsigned_char(1))
-                    self.__clients[UUID]['Connection'].send(pck)
+            self.__stop_accept_packages_event.set()
+            self.logger.debug('Started intercept the reception of packets from the client')
 
-                    break
+            for UUID in self.__clients.keys():
+                self.logger.debug(f'Send start_scanning package to {UUID}')
+                pck = self.__create_package(4, pack.unsigned_char(0))
+                self.__clients[UUID]['Connection'].send(pck)
 
-        self.logger.debug('Return to client threads the ability to receive packets')
-        self.__stop_accept_packages_event.clear()
+                while True:
+                    data = self.__clients[UUID]['Connection'].recv(10240)
+                    pck_id, pck_body = self.__parse_package(data)
+
+                    if pck_id == 4:
+                        readiness_client = struct.unpack('!B', pck_body)[0]
+
+                        if readiness_client == constants.Check.EXCEPTION:
+                            raise exceptions.NotAllClientsReadyError()
+                        elif readiness_client == constants.Check.KICK:
+                            self.kick(UUID,
+                                      reason=f'Client {UUID} wasn\'t ready when server start scanning')
+
+                        self.logger.debug(f'Send to the client with UUID - {UUID} the final package of readiness')
+
+                        pck = self.__create_package(4, pack.unsigned_char(1))
+                        self.__clients[UUID]['Connection'].send(pck)
+
+                        break
+
+            self.logger.debug('Return to client threads the ability to receive packets')
+            self.__stop_accept_packages_event.clear()
+        else:
+            raise exceptions.NoClientsError()
 
     def client_thread(self, conn: socket.socket, addr: tuple):
         UUID: uuid.UUID = uuid.uuid4()
@@ -179,6 +191,7 @@ class Server:
                         self.__clients[str(UUID)]['State'] = new_state
                         self.logger.debug(f'Set state to {str(UUID)} equal {new_state}')
                         self.logger.debug(self.__clients)
+                        self.__new_state_func(str(UUID), new_state)
                     else:
                         self.logger.debug(f'Get set_state package from {str(UUID)}, but scan started, ignored.')
                 elif pck_id == 3:
@@ -278,9 +291,9 @@ class Server:
     def run(self, ip='0.0.0.0', port=9090):
         if self.__server_close:
             self.logger.debug(f'Binding server to {ip}:{port}')
-            self.__bind(ip, port)
-            self.__server_close = False
-            self.logger.debug('Start accept_connections thread')
-            Thread(target=self.accept_connections_thread).start()
+            if self.__bind(ip, port):
+                self.__server_close = False
+                self.logger.debug('Start accept_connections thread')
+                Thread(target=self.accept_connections_thread).start()
         else:
-            raise exceptions.ServerIsAlreadyRunning()
+            raise exceptions.ServerIsAlreadyRunningError()
