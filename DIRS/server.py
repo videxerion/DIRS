@@ -56,7 +56,9 @@ class Server:
         self.__stop_accept_requests_event = threading.Event()
         self.__stop_accept_packages_event = threading.Event()
         self.size_chunk = size_chunk
-        self.__result_func = lambda x: self.logger.debug(x)
+        self.__result_func = lambda x: self.logger.debug(f'Result: {x}')
+        self.__new_client_func = lambda x: self.logger.debug(f'New client: {x}')
+        self.__delete_client_func = lambda x: self.logger.debug(f'Delete client: {x}')
         self.logger = logging.getLogger('server')
         self.__network = ipaddress.IPv4Network(network)
         self.__ip_generator = IPGenerator(self.__network)
@@ -64,6 +66,16 @@ class Server:
     def result_handler(self, func: Callable):
         self.logger.debug(f'Set result_handler - {func} with name {func.__name__}')
         self.__result_func = func
+        return func
+
+    def new_client_handler(self, func: Callable):
+        self.logger.debug(f'Set new_client_handler - {func} with name {func.__name__}')
+        self.__new_client_func = func
+        return func
+
+    def delete_client_handler(self, func: Callable):
+        self.logger.debug(f'Set delete_client_handler - {func} with name {func.__name__}')
+        self.__delete_client_func = func
         return func
 
     def set_network(self, network):
@@ -84,6 +96,7 @@ class Server:
         pck = self.__create_package(3, reason.encode('utf-8'))
         self.__clients[UUID]['Connection'].send(pck)
         self.logger.debug(f'Send disconnect package to client {UUID} by reason: {reason}')
+        self.__delete_client_func(UUID)
 
     def start_scanning(self, readiness='exception'):
         self.scan_started = True
@@ -145,10 +158,15 @@ class Server:
             }
         )
 
+        self.__new_client_func(str(UUID))
+
         while not self.__server_close:
             if not self.__stop_accept_packages_event.is_set():
                 data = conn.recv(10240)
                 if data == b'':
+                    del self.__clients[str(UUID)]
+                    self.logger.debug(f'Client {str(UUID)} lost connection')
+                    self.__delete_client_func(str(UUID))
                     break
                 pck_id, pck_body = self.__parse_package(data)
                 self.logger.debug(f'Get package from {str(UUID)} with id equal {pck_id}')
@@ -169,6 +187,7 @@ class Server:
                     del self.__clients[str(UUID)]
                     self.logger.debug(f'Disconnect client with UUID equal {str(UUID)} by reason: {reason}')
                     self.logger.debug(self.__clients)
+                    self.__delete_client_func(str(UUID))
                     break
                 elif pck_id == 5:
                     if self.scan_started:
