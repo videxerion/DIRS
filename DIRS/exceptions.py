@@ -26,3 +26,8 @@ class ServerIsAlreadyRunningError(Exception):
 class NoClientsError(Exception):
     def __init__(self):
         super().__init__("Unable to start scan because there is no client")
+
+
+class ScanPauseError(Exception):
+    def __init__(self):
+        super().__init__("Cannot be used until scanning is pause")
