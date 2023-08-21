@@ -56,11 +56,17 @@ class Client:
         self.__scan_started = False
         self.__scan_paused = False
         self.__get_chunk_func = lambda x, y: self.logger.debug(f'Get result for chunk with id {x}')
+        self.__server_close_func = lambda: self.logger.debug('Server close')
         self.__UUID = None
 
     def get_chunk_handler(self, func: Callable):
         self.logger.debug(f'Set get_chunk_handler - {func} with name {func.__name__}')
         self.__get_chunk_func = func
+        return func
+
+    def server_closed_handler(self, func: Callable):
+        self.logger.debug(f'Set get_chunk_handler - {func} with name {func.__name__}')
+        self.__server_close_func = func
         return func
 
     def close(self, reason='Disconnected by client'):
@@ -127,6 +133,7 @@ class Client:
                     reason = pck_body.decode('utf-8')
                     self.logger.debug(f'Kicked from server for a reason: {reason}')
                     self.__close = True
+                    self.__server_close_func()
                     break
                 elif pck_id == 4:
                     if not self.__scan_started:

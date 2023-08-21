@@ -214,6 +214,21 @@ class Server:
         else:
             raise exceptions.ScanHasBeenStartedError()
 
+    def get_clients(self):
+        clients = self.__clients.copy()
+        return_clients = {}
+
+        for client in clients:
+            return_clients.setdefault(
+                client, {
+                    'Address': clients[client]['Address'],
+                    'State': clients[client]['State'],
+                    'Info': clients[client]['Info']
+                }
+            )
+
+        return return_clients
+
     def client_thread(self, conn: socket.socket, addr: tuple):
         UUID: uuid.UUID = uuid.uuid4()
         pck = self.__create_package(1, UUID.bytes)
@@ -225,7 +240,8 @@ class Server:
             str(UUID), {
                 'Connection': conn,
                 'Address': addr,
-                'State': constants.States.NOT_READY
+                'State': constants.States.NOT_READY,
+                'Info': {}
             }
         )
 
@@ -315,6 +331,12 @@ class Server:
                         self.logger.warning(f'Get result_chunk package from {UUID}, but scan not started!')
                 elif pck_id == 9:
                     os_client = pck_body.decode('utf-8')
+
+                    if 'os' not in self.__clients[str(UUID)]['Info'].keys():
+                        self.__clients[str(UUID)]['Info'].setdefault('os', os_client)
+                    else:
+                        self.__clients[str(UUID)]['Info']['os'] = os_client
+
                     self.logger.debug(f'Get info from {str(UUID)} - {os_client}')
                     self.__get_info_client_func(str(UUID), os_client)
                 else:
